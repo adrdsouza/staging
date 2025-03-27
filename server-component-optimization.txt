@@ -1,0 +1,115 @@
+// Converting the Product Details page to use more server components
+// app/product/[slug]/page.tsx - Server Component
+
+import { Metadata } from 'next';
+import { fetchProduct, ProductIdTypeEnum, type Product } from '@/graphql';
+import { notFound } from 'next/navigation';
+import ProductDetails from './ProductDetails';
+import ProductGallery from './ProductGallery';
+
+export interface ProductPageProps {
+  params: {
+    slug: string;
+  };
+}
+
+export async function generateMetadata({
+  params,
+}: ProductPageProps): Promise<Metadata> {
+  const { slug } = params;
+  const product = await fetchProduct(slug, ProductIdTypeEnum.SLUG);
+  
+  if (!product) {
+    return {
+      title: 'Product not found - Damned Designs',
+    };
+  }
+
+  // Get the product images for OpenGraph
+  const images = [
+    product?.image?.sourceUrl ?? 
+      'https://admin.damneddesigns.com/wp-content/uploads/woocommerce-placeholder-1000x1000.png',
+    ...(product?.galleryImages?.nodes?.map(
+      (image) => image.sourceUrl ?? 
+        'https://admin.damneddesigns.com/wp-content/uploads/woocommerce-placeholder-1000x1000.png'
+    ) || []),
+  ];
+
+  return {
+    title: `${product.name} - Damned Designs`,
+    description: product.description?.replace(/<[^>]*>/g, '').substring(0, 160) || undefined,
+    openGraph: {
+      title: `${product.name} - Damned Designs`,
+      description: product.description?.replace(/<[^>]*>/g, '').substring(0, 160) || undefined,
+      images,
+    },
+  };
+}
+
+// app/product/[slug]/ProductGallery.tsx - Server Component 
+// This would be in a separate file
+export function ProductGallery({ images }: { images: string[] }) {
+  return (
+    <div className="w-full lg:w-1/2">
+      {/* Static gallery content - this can be a server component */}
+      <div className="relative aspect-square overflow-hidden mb-4">
+        <Image 
+          src={images[0] || '/placeholder.jpg'}
+          alt="Product main image"
+          fill
+          sizes="(max-width: 768px) 100vw, 50vw"
+          className="object-contain"
+          priority
+        />
+      </div>
+      
+      <div className="grid grid-cols-4 gap-2">
+        {images.slice(1).map((image, index) => (
+          <div key={index} className="relative aspect-square overflow-hidden">
+            <Image
+              src={image}
+              alt={`Product image ${index + 2}`}
+              fill
+              sizes="(max-width: 768px) 25vw, 12.5vw"
+              className="object-contain"
+            />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Static parts of the product page - Server Component
+const ProductPage = async ({ params }: ProductPageProps) => {
+  const { slug } = params;
+  const product = await fetchProduct(slug, ProductIdTypeEnum.SLUG);
+
+  if (!product) {
+    notFound();
+  }
+
+  // Prepare images for the gallery
+  const images = [
+    product?.image?.sourceUrl ?? 
+      'https://admin.damneddesigns.com/wp-content/uploads/woocommerce-placeholder-1000x1000.png',
+    ...(product?.galleryImages?.nodes?.map(
+      (image) => image.sourceUrl ?? 
+        'https://admin.damneddesigns.com/wp-content/uploads/woocommerce-placeholder-1000x1000.png'
+    ) || []),
+  ];
+
+  return (
+    <div className="w-full px-8 m-auto py-8 flex flex-col lg:flex-row gap-10">
+      {/* Server Component for the gallery */}
+      <ProductGallery images={images} />
+      
+      {/* Client Component for interactive parts */}
+      <div className="w-full lg:w-1/2 flex flex-col gap-5 py-5">
+        <ProductDetails product={product} />
+      </div>
+    </div>
+  );
+};
+
+export default ProductPage;
