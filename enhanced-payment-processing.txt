@@ -1,0 +1,357 @@
+// app/api/process-nmi/route.ts
+import { NextResponse } from 'next/server';
+import { rateLimit } from '@/lib/rate-limit';
+import { encrypt, hash, generateToken } from '@/lib/encryption';
+
+// Define strong types for the expected request body
+interface CardDetails {
+  number: string;
+  exp: string;
+}
+
+interface TokenData {
+  token: string;
+  card: CardDetails;
+}
+
+interface BillingInfo {
+  firstName: string;
+  lastName: string;
+  address1: string;
+  address2?: string;
+  city: string;
+  state: string;
+  postcode: string;
+  country: string;
+  phone: string;
+  email: string;
+}
+
+interface ShippingInfo {
+  firstName: string;
+  lastName: string;
+  address1: string;
+  address2?: string;
+  city: string;
+  state: string;
+  postcode: string;
+  country: string;
+}
+
+interface LineItem {
+  variation?: {
+    node: {
+      name: string;
+    }
+  };
+  quantity: number;
+}
+
+interface OrderInfo {
+  orderNumber: string;
+  billing: BillingInfo;
+  shipping: ShippingInfo;
+  lineItems: {
+    nodes: LineItem[];
+  };
+  total: string;
+}
+
+interface PaymentRequestBody {
+  token: TokenData;
+  order: OrderInfo;
+}
+
+// Rate limiter to prevent brute force attacks
+const limiter = rateLimit({
+  interval: 60 * 1000, // 1 minute
+  limit: 10, // Max 10 payment attempts per minute per IP
+});
+
+// Validate email format
+function isValidEmail(email: string): boolean {
+  const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+  return emailRegex.test(email);
+}
+
+// Validate phone number format
+function isValidPhone(phone: string): boolean {
+  const phoneRegex = /^\+?[1-9]\d{1,14}$/;
+  return phoneRegex.test(phone);
+}
+
+// Sanitize input to prevent injection attacks
+function sanitizeInput(input: string): string {
+  if (!input) return '';
+  // Remove potentially dangerous characters
+  return input
+    .replace(/[^\w\s.,\-@+\/:;()'&]/g, '')
+    .trim()
+    .substring(0, 255); // Limit length
+}
+
+// Format order items for description
+function formatOrderItems(items: LineItem[]): string {
+  return items
+    .map(item => {
+      const name = sanitizeInput(item?.variation?.node.name || 'Product');
+      const quantity = item.quantity || 1;
+      return `${name} × ${quantity}`;
+    })
+    .join(', ');
+}
+
+export async function POST(request: Request) {
+  // Generate a unique request ID for tracking
+  const requestId = generateToken(8);
+  
+  try {
+    // Get client IP for rate limiting
+    const ip = request.headers.get('cf-connecting-ip') || 
+               request.headers.get('x-forwarded-for')?.split(',')[0].trim() || 
+               'unknown';
+    
+    console.log(`[${requestId}] Payment request initiated from ${hash(ip)}`);
+    
+    // Check rate limit
+    try {
+      await limiter.check(ip);
+    } catch (error) {
+      console.warn(`[${requestId}] Rate limit exceeded for IP: ${hash(ip)}`);
+      return NextResponse.json(
+        { 
+          status: false, 
+          error: 'Too many payment attempts. Please wait and try again.' 
+        }, 
+        { 
+          status: 429,
+          headers: {
+            'Retry-After': '60',
+            'X-RateLimit-Limit': '10',
+            'X-RateLimit-Remaining': '0'
+          }
+        }
+      );
+    }
+
+    // Validate content type
+    const contentType = request.headers.get('content-type');
+    if (!contentType || !contentType.includes('application/json')) {
+      return NextResponse.json(
+        { status: false, error: 'Invalid content type' }, 
+        { status: 400 }
+      );
+    }
+
+    // Parse and validate request body
+    const body = await request.json() as PaymentRequestBody;
+    
+    // Validate required fields
+    if (!body.token || !body.order) {
+      return NextResponse.json(
+        { status: false, error: 'Missing required fields' },
+        { status: 400 }
+      );
+    }
+
+    // Validate token data
+    if (!body.token.token || !body.token.card) {
+      return NextResponse.json(
+        { status: false, error: 'Invalid payment token' },
+        { status: 400 }
+      );
+    }
+
+    // Validate billing information
+    const { billing } = body.order;
+    if (!billing || !billing.firstName || !billing.lastName || !billing.email) {
+      return NextResponse.json(
+        { status: false, error: 'Incomplete billing information' },
+        { status: 400 }
+      );
+    }
+
+    // Validate email format
+    if (!isValidEmail(billing.email)) {
+      return NextResponse.json(
+        { status: false, error: 'Invalid email format' },
+        { status: 400 }
+      );
+    }
+
+    // Validate phone format if provided
+    if (billing.phone && !isValidPhone(billing.phone)) {
+      return NextResponse.json(
+        { status: false, error: 'Invalid phone format' },
+        { status: 400 }
+      );
+    }
+
+    // Format order description with proper sanitization
+    const orderDesc = formatOrderItems(body.order.lineItems.nodes);
+
+    // Sanitize inputs for billing and shipping info
+    const billingInfo = {
+      first_name: sanitizeInput(billing.firstName),
+      last_name: sanitizeInput(billing.lastName),
+      address1: sanitizeInput(billing.address1),
+      address2: billing.address2 ? sanitizeInput(billing.address2) : '',
+      city: sanitizeInput(billing.city),
+      state: sanitizeInput(billing.state),
+      zip: sanitizeInput(billing.postcode),
+      country: sanitizeInput(billing.country),
+      phone: sanitizeInput(billing.phone),
+      email: sanitizeInput(billing.email),
+    };
+
+    const shipping = body.order.shipping;
+    const shippingInfo = {
+      shipping_firstname: sanitizeInput(shipping.firstName),
+      shipping_lastname: sanitizeInput(shipping.lastName),
+      shipping_address1: sanitizeInput(shipping.address1),
+      shipping_address2: shipping.address2 ? sanitizeInput(shipping.address2) : '',
+      shipping_city: sanitizeInput(shipping.city),
+      shipping_state: sanitizeInput(shipping.state),
+      shipping_country: sanitizeInput(shipping.country),
+      shipping_zip: sanitizeInput(shipping.postcode),
+    };
+
+    // Verify NMI API key exists
+    const nmiPrivateKey = process.env.NMI_PRIVATE_KEY;
+    if (!nmiPrivateKey) {
+      console.error(`[${requestId}] NMI_PRIVATE_KEY environment variable is not set`);
+      return NextResponse.json(
+        { status: false, error: 'Payment configuration error' },
+        { status: 500 }
+      );
+    }
+
+    // Parse order total, ensuring it's a valid number
+    let orderTotal = '0.00';
+    try {
+      const totalNum = parseFloat(body.order.total.replace(/[^\d.-]/g, ''));
+      if (isNaN(totalNum) || totalNum < 0) {
+        throw new Error('Invalid order total');
+      }
+      orderTotal = totalNum.toFixed(2);
+    } catch (error) {
+      console.error(`[${requestId}] Invalid order total: ${body.order.total}`);
+      return NextResponse.json(
+        { status: false, error: 'Invalid order total' },
+        { status: 400 }
+      );
+    }
+
+    // Build the NMI request data
+    const nmiRequestData = {
+      type: 'sale',
+      security_key: nmiPrivateKey,
+      payment_token: body.token.token,
+
+      // Card details (minimal needed with token)
+      ccexp: body.token.card.exp,
+
+      // Order details
+      amount: orderTotal,
+      currency: 'USD',
+      orderid: sanitizeInput(body.order.orderNumber),
+      order_description: `Damned Designs - Order ${sanitizeInput(body.order.orderNumber)} (${orderDesc})`,
+      ipaddress: ip,
+      customer_receipt: true,
+
+      // Billing and shipping info
+      ...billingInfo,
+      ...shippingInfo,
+    };
+
+    // Use URLSearchParams to format the request body properly
+    const reqData = new URLSearchParams(nmiRequestData);
+
+    console.log(`[${requestId}] Payment attempt for order ${body.order.orderNumber} in progress`);
+
+    // Make the API request to NMI
+    const response = await fetch(
+      'https://secure.networkmerchants.com/api/transact.php',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: reqData,
+      }
+    );
+
+    // Handle HTTP errors
+    if (response.status !== 200) {
+      console.error(`[${requestId}] NMI API HTTP error: ${response.status}`);
+      return NextResponse.json(
+        { status: false, error: 'Payment gateway error' },
+        { status: 502 }
+      );
+    }
+
+    // Parse the NMI response
+    const nmiResponse = await response.text();
+    const params = new URLSearchParams(nmiResponse);
+    const result: Record<string, string> = {};
+
+    for (const [key, value] of params.entries()) {
+      result[key] = value;
+    }
+
+    // Check for NMI success response
+    if (result.response !== '1') {
+      console.error(`[${requestId}] NMI payment declined: ${result.responsetext}`);
+      return NextResponse.json(
+        { 
+          status: false, 
+          message: result.responsetext || 'Payment declined', 
+          errorCode: result.response 
+        },
+        { status: 400 }
+      );
+    }
+
+    console.log(`[${requestId}] Payment successful (Transaction ID: ${result.transactionid})`);
+
+    // Encrypt sensitive data before storing in database
+    try {
+      // This is where you'd typically store transaction data in your database
+      // using the encryption utility to protect sensitive information
+      
+      // Example (not actually executed here):
+      // const encryptedCardInfo = encrypt(JSON.stringify({
+      //   last4: body.token.card.number.slice(-4),
+      //   expiration: body.token.card.exp
+      // }));
+      
+      // await db.transactions.create({
+      //   transactionId: result.transactionid,
+      //   orderId: body.order.orderNumber,
+      //   amount: orderTotal,
+      //   cardInfo: encryptedCardInfo,
+      //   status: 'approved'
+      // });
+    } catch (error) {
+      console.error(`[${requestId}] Error storing transaction data: ${error}`);
+      // Continue processing since payment was successful
+    }
+
+    // Return successful response with minimal information
+    return NextResponse.json({ 
+      status: true, 
+      data: {
+        transactionId: result.transactionid,
+        authCode: result.authcode,
+        avsResponse: result.avsresponse,
+        orderNumber: body.order.orderNumber
+      } 
+    });
+  } catch (error) {
+    console.error(`[${requestId}] Payment processing error:`, error);
+    return NextResponse.json({ 
+      status: false, 
+      error: 'An unexpected error occurred processing your payment' 
+    }, { status: 500 });
+  }
+}

@@ -1,0 +1,389 @@
+// components/ui/AccessibilityMenu.tsx
+'use client';
+
+import React, { useRef } from 'react';
+import { useButton } from 'react-aria';
+import { useToggleState } from 'react-stately';
+import { useOverlayTriggerState } from '@react-stately/overlays';
+import { useOverlayPosition, useOverlay, DismissButton, FocusScope, OverlayContainer } from 'react-aria';
+import { Eye, Type, Move, RotateCcw, ChevronDown, Contrast, ZoomIn, ZoomOut, MousePointerClick } from 'lucide-react';
+
+// Define the accessibility settings type
+interface AccessibilitySettings {
+  highContrast: boolean;
+  fontSize: number;
+  reducedMotion: boolean;
+  cursorSize: 'normal' | 'large' | 'larger';
+}
+
+// Create context for accessibility settings
+const AccessibilityContext = React.createContext<{
+  settings: AccessibilitySettings;
+  updateSettings: (newSettings: Partial<AccessibilitySettings>) => void;
+}>({
+  settings: {
+    highContrast: false,
+    fontSize: 100,
+    reducedMotion: false,
+    cursorSize: 'normal',
+  },
+  updateSettings: () => {},
+});
+
+// Hook to use accessibility settings
+export function useAccessibilitySettings() {
+  return React.useContext(AccessibilityContext);
+}
+
+// Provider component for accessibility settings
+export function AccessibilityProvider({ children }: { children: React.ReactNode }) {
+  // Initialize state from localStorage if available
+  const [settings, setSettings] = React.useState<AccessibilitySettings>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const savedSettings = localStorage.getItem('accessibilitySettings');
+        if (savedSettings) {
+          return JSON.parse(savedSettings);
+        }
+      } catch (e) {
+        console.warn('Error loading accessibility settings:', e);
+      }
+    }
+    return {
+      highContrast: false,
+      fontSize: 100,
+      reducedMotion: false,
+      cursorSize: 'normal',
+    };
+  });
+
+  // Update settings and save to localStorage
+  const updateSettings = React.useCallback((newSettings: Partial<AccessibilitySettings>) => {
+    setSettings(prev => {
+      const updated = { ...prev, ...newSettings };
+      if (typeof window !== 'undefined') {
+        try {
+          localStorage.setItem('accessibilitySettings', JSON.stringify(updated));
+        } catch (e) {
+          console.warn('Error saving accessibility settings:', e);
+        }
+      }
+      return updated;
+    });
+  }, []);
+
+  // Apply settings to the document
+  React.useEffect(() => {
+    if (typeof document === 'undefined') return;
+
+    // High contrast
+    if (settings.highContrast) {
+      document.documentElement.classList.add('high-contrast');
+    } else {
+      document.documentElement.classList.remove('high-contrast');
+    }
+
+    // Font size
+    document.documentElement.style.fontSize = `${settings.fontSize}%`;
+
+    // Reduced motion
+    if (settings.reducedMotion) {
+      document.documentElement.classList.add('reduced-motion');
+    } else {
+      document.documentElement.classList.remove('reduced-motion');
+    }
+
+    // Cursor size
+    document.documentElement.classList.remove('cursor-large', 'cursor-larger');
+    if (settings.cursorSize === 'large') {
+      document.documentElement.classList.add('cursor-large');
+    } else if (settings.cursorSize === 'larger') {
+      document.documentElement.classList.add('cursor-larger');
+    }
+  }, [settings]);
+
+  return (
+    <AccessibilityContext.Provider value={{ settings, updateSettings }}>
+      {children}
+    </AccessibilityContext.Provider>
+  );
+}
+
+// Button component with accessibility
+function Button({ 
+  children, 
+  onPress, 
+  className,
+  ...props 
+}: { 
+  children: React.ReactNode; 
+  onPress?: () => void; 
+  className?: string; 
+  [key: string]: any;
+}) {
+  const ref = React.useRef<HTMLButtonElement>(null);
+  const { buttonProps } = useButton({ onPress, ...props }, ref);
+
+  return (
+    <button 
+      {...buttonProps} 
+      ref={ref} 
+      className={`inline-flex items-center justify-center rounded-md px-3 py-2 text-sm font-medium transition-colors 
+        focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2 
+        disabled:opacity-50 disabled:pointer-events-none ${className || ''}`}
+    >
+      {children}
+    </button>
+  );
+}
+
+// PopoverButton component
+function PopoverButton({ 
+  label, 
+  isOpen, 
+  onToggle 
+}: { 
+  label: string; 
+  isOpen: boolean; 
+  onToggle: () => void;
+}) {
+  const ref = React.useRef<HTMLButtonElement>(null);
+  const { buttonProps } = useButton({ 
+    onPress: onToggle,
+    'aria-label': label,
+    'aria-haspopup': true,
+    'aria-expanded': isOpen,
+  }, ref);
+
+  return (
+    <button 
+      {...buttonProps} 
+      ref={ref} 
+      className="bg-slate-700 text-white p-3 rounded-full shadow-lg focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-slate-500"
+    >
+      <span className="sr-only">{label}</span>
+      <Contrast className="h-6 w-6" aria-hidden="true" />
+    </button>
+  );
+}
+
+// Popover component
+function Popover({ 
+  state, 
+  triggerRef, 
+  children 
+}: { 
+  state: any; 
+  triggerRef: React.RefObject<HTMLElement>; 
+  children: React.ReactNode;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const { overlayProps } = useOverlay({
+    isOpen: state.isOpen,
+    onClose: state.close,
+    shouldCloseOnBlur: true,
+    isDismissable: true,
+  }, ref);
+
+  // Get position of the popover relative to the trigger
+  const { overlayProps: positionProps } = useOverlayPosition({
+    targetRef: triggerRef,
+    overlayRef: ref,
+    placement: 'top',
+    offset: 16,
+    isOpen: state.isOpen,
+  });
+
+  // Merge props and set styles
+  const style = {
+    ...positionProps.style,
+    position: 'absolute',
+    zIndex: 100,
+  };
+
+  // If closed, don't render anything
+  if (!state.isOpen) {
+    return null;
+  }
+
+  return (
+    <OverlayContainer>
+      <FocusScope restoreFocus autoFocus>
+        <div 
+          {...overlayProps} 
+          ref={ref} 
+          style={style} 
+          className="bg-white dark:bg-slate-800 rounded-lg shadow-xl p-4 w-72 border border-slate-200 dark:border-slate-700"
+        >
+          <DismissButton onDismiss={state.close} />
+          {children}
+          <DismissButton onDismiss={state.close} />
+        </div>
+      </FocusScope>
+    </OverlayContainer>
+  );
+}
+
+// Toggle button for accessibility options
+function ToggleButton({ 
+  isSelected, 
+  onChange, 
+  children,
+  icon: Icon,
+  label,
+}: { 
+  isSelected: boolean; 
+  onChange: (isSelected: boolean) => void; 
+  children: React.ReactNode;
+  icon: any;
+  label: string;
+}) {
+  const state = useToggleState({ isSelected, onChange });
+  const ref = useRef<HTMLButtonElement>(null);
+  const { buttonProps } = useButton({ ...state, 'aria-label': label }, ref);
+
+  return (
+    <button 
+      {...buttonProps} 
+      ref={ref}
+      className={`flex items-center space-x-2 w-full p-2 rounded transition-colors
+        ${isSelected ? 'bg-blue-50 dark:bg-blue-900' : 'hover:bg-slate-100 dark:hover:bg-slate-700'}`}
+    >
+      <Icon className="w-5 h-5" aria-hidden="true" />
+      <span>{children}</span>
+    </button>
+  );
+}
+
+// Main accessibility menu component
+export function AccessibilityMenu() {
+  const { settings, updateSettings } = useAccessibilitySettings();
+  const state = useOverlayTriggerState({});
+  const triggerRef = useRef<HTMLButtonElement>(null);
+
+  return (
+    <div className="fixed bottom-4 right-4 z-50">
+      {/* Skip link - visible when focused */}
+      <a 
+        href="#main-content" 
+        className="sr-only focus:not-sr-only focus:absolute focus:bottom-20 focus:right-0 focus:p-3 focus:bg-white focus:text-black focus:z-50 focus:rounded-l-md focus:shadow-lg"
+      >
+        Skip to main content
+      </a>
+      
+      {/* Accessibility menu button */}
+      <PopoverButton 
+        label="Accessibility options" 
+        isOpen={state.isOpen} 
+        onToggle={() => state.toggle()} 
+      />
+
+      {/* Accessibility menu popover */}
+      <Popover state={state} triggerRef={triggerRef}>
+        <div className="text-slate-800 dark:text-white font-medium mb-3 pb-2 border-b border-slate-200 dark:border-slate-700">
+          Accessibility Options
+        </div>
+        
+        <div className="space-y-3">
+          {/* High contrast mode */}
+          <ToggleButton 
+            isSelected={settings.highContrast} 
+            onChange={(isSelected) => updateSettings({ highContrast: isSelected })}
+            icon={Eye}
+            label="Toggle high contrast mode"
+          >
+            {settings.highContrast ? 'Disable' : 'Enable'} High Contrast
+          </ToggleButton>
+          
+          {/* Font size controls */}
+          <div>
+            <div className="flex items-center justify-between mb-1 px-2">
+              <div className="flex items-center space-x-2">
+                <Type className="w-5 h-5" aria-hidden="true" />
+                <span>Text Size ({settings.fontSize}%)</span>
+              </div>
+              <Button
+                onPress={() => updateSettings({ fontSize: 100 })}
+                aria-label="Reset font size"
+                className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-700"
+              >
+                <RotateCcw className="w-4 h-4" />
+              </Button>
+            </div>
+            
+            <div className="flex items-center space-x-2">
+              <Button
+                onPress={() => updateSettings({ fontSize: Math.max(80, settings.fontSize - 10) })}
+                aria-label="Decrease font size"
+                disabled={settings.fontSize <= 80}
+                className="p-2 rounded hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-50"
+              >
+                <ZoomOut className="w-4 h-4" aria-hidden="true" /> 
+                <span className="sr-only">Decrease</span>
+              </Button>
+              
+              <div className="flex-1 h-2 bg-slate-200 dark:bg-slate-700 rounded-full">
+                <div 
+                  className="h-2 bg-blue-500 rounded-full" 
+                  style={{ width: `${((settings.fontSize - 80) / 120) * 100}%` }}
+                  aria-hidden="true"
+                />
+              </div>
+              
+              <Button
+                onPress={() => updateSettings({ fontSize: Math.min(200, settings.fontSize + 10) })}
+                aria-label="Increase font size"
+                disabled={settings.fontSize >= 200}
+                className="p-2 rounded hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-50"
+              >
+                <ZoomIn className="w-4 h-4" aria-hidden="true" />
+                <span className="sr-only">Increase</span>
+              </Button>
+            </div>
+          </div>
+          
+          {/* Reduced motion */}
+          <ToggleButton 
+            isSelected={settings.reducedMotion} 
+            onChange={(isSelected) => updateSettings({ reducedMotion: isSelected })}
+            icon={Move}
+            label="Toggle reduced motion"
+          >
+            {settings.reducedMotion ? 'Enable' : 'Reduce'} Animations
+          </ToggleButton>
+          
+          {/* Cursor size */}
+          <div>
+            <div className="flex items-center px-2 mb-1">
+              <MousePointerClick className="w-5 h-5 mr-2" aria-hidden="true" />
+              <span>Cursor Size</span>
+            </div>
+            
+            <div className="grid grid-cols-3 gap-2 mt-1">
+              <Button
+                onPress={() => updateSettings({ cursorSize: 'normal' })}
+                className={`text-xs py-1 ${settings.cursorSize === 'normal' ? 'bg-blue-100 dark:bg-blue-800 text-blue-700 dark:text-blue-100' : 'bg-slate-100 dark:bg-slate-700'}`}
+              >
+                Normal
+              </Button>
+              <Button
+                onPress={() => updateSettings({ cursorSize: 'large' })}
+                className={`text-xs py-1 ${settings.cursorSize === 'large' ? 'bg-blue-100 dark:bg-blue-800 text-blue-700 dark:text-blue-100' : 'bg-slate-100 dark:bg-slate-700'}`}
+              >
+                Large
+              </Button>
+              <Button
+                onPress={() => updateSettings({ cursorSize: 'larger' })}
+                className={`text-xs py-1 ${settings.cursorSize === 'larger' ? 'bg-blue-100 dark:bg-blue-800 text-blue-700 dark:text-blue-100' : 'bg-slate-100 dark:bg-slate-700'}`}
+              >
+                Larger
+              </Button>
+            </div>
+          </div>
+        </div>
+      </Popover>
+    </div>
+  );
+}
+
+export default AccessibilityMenu;

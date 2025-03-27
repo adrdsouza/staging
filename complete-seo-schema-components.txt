@@ -1,0 +1,542 @@
+// components/seo/ProductSchema.tsx
+import React from 'react';
+import { validateSchema, createProductSchema } from '@/lib/seo/validate-schema';
+
+interface ProductSchemaProps {
+  product: {
+    name: string;
+    description?: string;
+    image?: string;
+    price: string | number;
+    currency?: string;
+    sku?: string;
+    slug?: string;
+    availability?: 'InStock' | 'OutOfStock' | 'PreOrder';
+    brand?: string;
+    rating?: {
+      value: number;
+      count: number;
+    };
+  };
+  baseUrl?: string;
+}
+
+export const ProductSchema: React.FC<ProductSchemaProps> = ({ 
+  product,
+  baseUrl = 'https://damneddesigns.com'
+}) => {
+  // Create the schema object
+  const schemaData = {
+    ...createProductSchema(product),
+    url: `${baseUrl}/product/${product.slug || ''}`,
+  };
+  
+  // Validate in development
+  if (process.env.NODE_ENV === 'development') {
+    const validationResult = validateSchema(schemaData, 'Product');
+    if (!validationResult.valid) {
+      console.warn('Invalid Product schema:', validationResult.errors);
+    }
+  }
+
+  return (
+    <script
+      type="application/ld+json"
+      dangerouslySetInnerHTML={{ __html: JSON.stringify(schemaData) }}
+    />
+  );
+};
+
+// components/seo/BreadcrumbSchema.tsx
+import React from 'react';
+import { validateSchema, createBreadcrumbSchema } from '@/lib/seo/validate-schema';
+
+interface BreadcrumbSchemaProps {
+  items: Array<{
+    name: string;
+    href: string;
+  }>;
+  baseUrl?: string;
+}
+
+export const BreadcrumbSchema: React.FC<BreadcrumbSchemaProps> = ({ 
+  items,
+  baseUrl = 'https://damneddesigns.com'
+}) => {
+  // Format items for schema
+  const schemaItems = items.map(item => ({
+    name: item.name,
+    url: item.href.startsWith('http') ? item.href : `${baseUrl}${item.href}`,
+  }));
+  
+  // Create the schema object
+  const schemaData = createBreadcrumbSchema(schemaItems);
+  
+  // Validate in development
+  if (process.env.NODE_ENV === 'development') {
+    const validationResult = validateSchema(schemaData, 'BreadcrumbList');
+    if (!validationResult.valid) {
+      console.warn('Invalid BreadcrumbList schema:', validationResult.errors);
+    }
+  }
+
+  return (
+    <script
+      type="application/ld+json"
+      dangerouslySetInnerHTML={{ __html: JSON.stringify(schemaData) }}
+    />
+  );
+};
+
+// components/seo/OrganizationSchema.tsx
+import React from 'react';
+import { validateSchema, createOrganizationSchema } from '@/lib/seo/validate-schema';
+
+interface OrganizationSchemaProps {
+  organization?: {
+    name?: string;
+    url?: string;
+    logo?: string;
+    description?: string;
+    sameAs?: string[];
+    contactPoint?: {
+      telephone: string;
+      contactType: string;
+      email?: string;
+      availableLanguage?: string;
+    };
+  };
+}
+
+export const OrganizationSchema: React.FC<OrganizationSchemaProps> = ({ 
+  organization
+}) => {
+  // Use default or provided organization
+  const org = {
+    name: 'Damned Designs',
+    url: 'https://damneddesigns.com',
+    logo: 'https://admin.damneddesigns.com/wp-content/uploads/damned-designs-logo.png',
+    description: 'Premium knives and EDC products by Damned Designs',
+    sameAs: [
+      'https://www.facebook.com/damneddesigns',
+      'https://www.instagram.com/damned.designs/',
+      'https://twitter.com/damneddesigns',
+    ],
+    contactPoint: {
+      telephone: '+1-337-602-9228',
+      contactType: 'customer service',
+      email: 'info@damneddesigns.com',
+      availableLanguage: 'English',
+    },
+    ...organization
+  };
+  
+  // Create the schema object
+  const schemaData = createOrganizationSchema(org);
+  
+  // Validate in development
+  if (process.env.NODE_ENV === 'development') {
+    const validationResult = validateSchema(schemaData, 'Organization');
+    if (!validationResult.valid) {
+      console.warn('Invalid Organization schema:', validationResult.errors);
+    }
+  }
+
+  return (
+    <script
+      type="application/ld+json"
+      dangerouslySetInnerHTML={{ __html: JSON.stringify(schemaData) }}
+    />
+  );
+};
+
+// components/seo/Breadcrumbs.tsx
+import React from 'react';
+import Link from 'next/link';
+import { ChevronRight } from 'lucide-react';
+import { BreadcrumbSchema } from './BreadcrumbSchema';
+
+interface BreadcrumbProps {
+  items: Array<{
+    name: string;
+    href: string;
+  }>;
+  baseUrl?: string;
+}
+
+export const Breadcrumbs: React.FC<BreadcrumbProps> = ({ items, baseUrl }) => {
+  if (!items || items.length === 0) return null;
+
+  return (
+    <>
+      {/* Add the structured data */}
+      <BreadcrumbSchema items={items} baseUrl={baseUrl} />
+      
+      {/* Visual breadcrumbs */}
+      <nav aria-label="Breadcrumbs" className="py-3 px-4 text-sm">
+        <ol className="flex flex-wrap items-center gap-1">
+          {items.map((item, index) => (
+            <li key={item.href} className="flex items-center">
+              {index > 0 && (
+                <ChevronRight className="h-4 w-4 mx-1 text-gray-400" aria-hidden="true" />
+              )}
+              
+              {index === items.length - 1 ? (
+                <span className="font-medium text-gray-700" aria-current="page">
+                  {item.name}
+                </span>
+              ) : (
+                <Link 
+                  href={item.href}
+                  className="text-gray-500 hover:text-gray-700 transition-colors"
+                >
+                  {item.name}
+                </Link>
+              )}
+            </li>
+          ))}
+        </ol>
+      </nav>
+    </>
+  );
+};
+
+// components/seo/FAQSchema.tsx
+import React from 'react';
+
+interface FAQItem {
+  question: string;
+  answer: string;
+}
+
+interface FAQSchemaProps {
+  items: FAQItem[];
+}
+
+export const FAQSchema: React.FC<FAQSchemaProps> = ({ items }) => {
+  const schema = {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    "mainEntity": items.map(item => ({
+      "@type": "Question",
+      "name": item.question,
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": item.answer
+      }
+    }))
+  };
+
+  return (
+    <script
+      type="application/ld+json"
+      dangerouslySetInnerHTML={{ __html: JSON.stringify(schema) }}
+    />
+  );
+};
+
+// components/seo/WebsiteSchema.tsx
+import React from 'react';
+
+interface WebsiteSchemaProps {
+  name?: string;
+  url?: string;
+  description?: string;
+  language?: string;
+  keywords?: string[];
+}
+
+export const WebsiteSchema: React.FC<WebsiteSchemaProps> = ({
+  name = 'Damned Designs',
+  url = 'https://damneddesigns.com',
+  description = 'Premium knives and EDC products by Damned Designs',
+  language = 'en-US',
+  keywords = ['knives', 'EDC', 'pocket knives', 'titanium', 'fixed blade', 'kitchen knives']
+}) => {
+  const schema = {
+    "@context": "https://schema.org",
+    "@type": "WebSite",
+    "name": name,
+    "url": url,
+    "description": description,
+    "inLanguage": language,
+    "potentialAction": {
+      "@type": "SearchAction",
+      "target": `${url}/search?query={search_term_string}`,
+      "query-input": "required name=search_term_string"
+    },
+    "keywords": keywords.join(', ')
+  };
+
+  return (
+    <script
+      type="application/ld+json"
+      dangerouslySetInnerHTML={{ __html: JSON.stringify(schema) }}
+    />
+  );
+};
+
+// components/seo/LocalBusinessSchema.tsx
+import React from 'react';
+
+interface LocalBusinessSchemaProps {
+  name?: string;
+  url?: string;
+  logo?: string;
+  description?: string;
+  telephone?: string;
+  email?: string;
+  address?: {
+    streetAddress?: string;
+    addressLocality?: string;
+    addressRegion?: string;
+    postalCode?: string;
+    addressCountry?: string;
+  };
+  geo?: {
+    latitude?: number;
+    longitude?: number;
+  };
+  openingHours?: string[];
+  priceRange?: string;
+}
+
+export const LocalBusinessSchema: React.FC<LocalBusinessSchemaProps> = ({
+  name = 'Damned Designs',
+  url = 'https://damneddesigns.com',
+  logo = 'https://admin.damneddesigns.com/wp-content/uploads/damned-designs-logo.png',
+  description = 'Premium knives and EDC products by Damned Designs',
+  telephone = '+1-337-602-9228',
+  email = 'info@damneddesigns.com',
+  address = {
+    streetAddress: '',
+    addressLocality: 'Reno',
+    addressRegion: 'NV',
+    postalCode: '',
+    addressCountry: 'US'
+  },
+  geo,
+  openingHours = ['Mo-Fr 09:00-17:00'],
+  priceRange = '$$'
+}) => {
+  const schema = {
+    "@context": "https://schema.org",
+    "@type": "Store",
+    "name": name,
+    "url": url,
+    "logo": logo,
+    "image": logo,
+    "description": description,
+    "telephone": telephone,
+    "email": email,
+    "address": {
+      "@type": "PostalAddress",
+      ...address
+    },
+    ...(geo && {
+      "geo": {
+        "@type": "GeoCoordinates",
+        "latitude": geo.latitude,
+        "longitude": geo.longitude
+      }
+    }),
+    "openingHours": openingHours,
+    "priceRange": priceRange
+  };
+
+  return (
+    <script
+      type="application/ld+json"
+      dangerouslySetInnerHTML={{ __html: JSON.stringify(schema) }}
+    />
+  );
+};
+
+// components/seo/SEOHead.tsx
+import React from 'react';
+import Head from 'next/head';
+import { useRouter } from 'next/router';
+import { OrganizationSchema } from './OrganizationSchema';
+import { WebsiteSchema } from './WebsiteSchema';
+
+interface SEOHeadProps {
+  title?: string;
+  description?: string;
+  canonicalUrl?: string;
+  ogImage?: string;
+  ogType?: 'website' | 'article' | 'product';
+  children?: React.ReactNode;
+}
+
+export const SEOHead: React.FC<SEOHeadProps> = ({
+  title = 'Damned Designs - Premium EDC Tools and Knives',
+  description = 'Premium quality knives and EDC tools by Damned Designs. Expertly crafted with great attention to detail.',
+  canonicalUrl,
+  ogImage = 'https://admin.damneddesigns.com/wp-content/uploads/default-social-image.jpg',
+  ogType = 'website',
+  children
+}) => {
+  const router = useRouter();
+  const baseUrl = 'https://damneddesigns.com';
+  const fullUrl = canonicalUrl || `${baseUrl}${router.asPath}`;
+  const fullTitle = title.includes(' - Damned Designs') ? title : `${title} - Damned Designs`;
+  
+  return (
+    <>
+      <Head>
+        <title>{fullTitle}</title>
+        <meta name="description" content={description} />
+        <link rel="canonical" href={fullUrl} />
+        
+        {/* Open Graph */}
+        <meta property="og:url" content={fullUrl} />
+        <meta property="og:type" content={ogType} />
+        <meta property="og:title" content={fullTitle} />
+        <meta property="og:description" content={description} />
+        <meta property="og:image" content={ogImage} />
+        <meta property="og:site_name" content="Damned Designs" />
+        
+        {/* Twitter */}
+        <meta name="twitter:card" content="summary_large_image" />
+        <meta name="twitter:site" content="@damneddesigns" />
+        <meta name="twitter:title" content={fullTitle} />
+        <meta name="twitter:description" content={description} />
+        <meta name="twitter:image" content={ogImage} />
+        
+        {/* Mobile */}
+        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5" />
+        <meta name="theme-color" content="#4a5568" />
+        
+        {/* Favicon */}
+        <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+      </Head>
+      
+      {/* Schema.org markup */}
+      <OrganizationSchema />
+      <WebsiteSchema />
+      
+      {/* Additional schemas passed as children */}
+      {children}
+    </>
+  );
+};
+
+// components/seo/ReviewSchema.tsx
+import React from 'react';
+
+interface ReviewProps {
+  review: {
+    reviewRating: number;
+    author: string;
+    reviewBody: string;
+    datePublished?: string;
+  };
+  itemReviewed: {
+    name: string;
+    type?: string;
+    image?: string;
+    url?: string;
+  };
+}
+
+export const ReviewSchema: React.FC<ReviewProps> = ({ review, itemReviewed }) => {
+  const schema = {
+    "@context": "https://schema.org",
+    "@type": "Review",
+    "reviewRating": {
+      "@type": "Rating",
+      "ratingValue": review.reviewRating,
+      "bestRating": "5"
+    },
+    "author": {
+      "@type": "Person",
+      "name": review.author
+    },
+    "reviewBody": review.reviewBody,
+    "datePublished": review.datePublished || new Date().toISOString().split('T')[0],
+    "itemReviewed": {
+      "@type": itemReviewed.type || "Product",
+      "name": itemReviewed.name,
+      "image": itemReviewed.image,
+      "url": itemReviewed.url
+    }
+  };
+
+  return (
+    <script
+      type="application/ld+json"
+      dangerouslySetInnerHTML={{ __html: JSON.stringify(schema) }}
+    />
+  );
+};
+
+// components/seo/ProductListSchema.tsx
+import React from 'react';
+
+interface ProductListItemProps {
+  name: string;
+  url: string;
+  image?: string;
+  price?: string | number;
+  currency?: string;
+  availability?: 'InStock' | 'OutOfStock' | 'PreOrder';
+  description?: string;
+}
+
+interface ProductListSchemaProps {
+  items: ProductListItemProps[];
+  listName?: string;
+  baseUrl?: string;
+}
+
+export const ProductListSchema: React.FC<ProductListSchemaProps> = ({
+  items,
+  listName = 'Featured Products',
+  baseUrl = 'https://damneddesigns.com'
+}) => {
+  const schema = {
+    "@context": "https://schema.org",
+    "@type": "ItemList",
+    "name": listName,
+    "itemListElement": items.map((item, index) => ({
+      "@type": "ListItem",
+      "position": index + 1,
+      "item": {
+        "@type": "Product",
+        "name": item.name,
+        "url": item.url.startsWith('http') ? item.url : `${baseUrl}${item.url}`,
+        "image": item.image,
+        ...(item.price && {
+          "offers": {
+            "@type": "Offer",
+            "price": typeof item.price === 'number' ? item.price.toString() : item.price.replace(/[^0-9.]/g, ''),
+            "priceCurrency": item.currency || "USD",
+            "availability": `https://schema.org/${item.availability || 'InStock'}`,
+          }
+        }),
+        ...(item.description && { "description": item.description })
+      }
+    }))
+  };
+
+  return (
+    <script
+      type="application/ld+json"
+      dangerouslySetInnerHTML={{ __html: JSON.stringify(schema) }}
+    />
+  );
+};
+
+// Export all components
+export {
+  ProductSchema,
+  BreadcrumbSchema,
+  OrganizationSchema,
+  Breadcrumbs,
+  FAQSchema,
+  WebsiteSchema,
+  LocalBusinessSchema,
+  SEOHead,
+  ReviewSchema,
+  ProductListSchema
+};

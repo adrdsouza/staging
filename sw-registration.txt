@@ -1,0 +1,145 @@
+// lib/service-worker/register.ts
+/**
+ * Service Worker Registration
+ * 
+ * This module handles the registration and updates of the service worker
+ * for offline support and performance enhancements.
+ */
+
+// Check if service workers are supported
+const isServiceWorkerSupported = 
+  typeof window !== 'undefined' && 'serviceWorker' in navigator;
+
+/**
+ * Register the service worker
+ */
+export function registerServiceWorker() {
+  if (!isServiceWorkerSupported) {
+    console.log('Service workers are not supported in this browser');
+    return;
+  }
+
+  const swPath = '/sw.js';
+
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register(swPath)
+      .then(registration => {
+        console.log('Service Worker registered with scope:', registration.scope);
+        
+        // Check for updates
+        registration.addEventListener('updatefound', () => {
+          const newWorker = registration.installing;
+          console.log('Service Worker update found!');
+          
+          newWorker?.addEventListener('statechange', () => {
+            if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+              // New version available
+              showUpdateNotification();
+            }
+          });
+        });
+      })
+      .catch(error => {
+        console.error('Service Worker registration failed:', error);
+      });
+      
+    // Handle service worker updates
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      console.log('New Service Worker activated');
+    });
+  });
+}
+
+/**
+ * Trigger service worker update check
+ */
+export function checkForUpdates() {
+  if (!isServiceWorkerSupported) return;
+
+  navigator.serviceWorker.getRegistration().then(registration => {
+    if (registration) {
+      registration.update();
+    }
+  });
+}
+
+/**
+ * Unregister all service workers
+ */
+export function unregisterServiceWorkers() {
+  if (!isServiceWorkerSupported) return;
+
+  navigator.serviceWorker.getRegistrations().then(registrations => {
+    for (const registration of registrations) {
+      registration.unregister();
+    }
+    console.log('Service Workers unregistered');
+  });
+}
+
+/**
+ * Show a notification to the user about the update
+ */
+function showUpdateNotification() {
+  // Create notification UI element
+  const notification = document.createElement('div');
+  notification.className = 'fixed bottom-16 right-4 bg-blue-600 text-white p-4 rounded-lg shadow-lg z-50 max-w-xs';
+  notification.innerHTML = `
+    <div class="flex items-center justify-between">
+      <p class="flex-1 mr-4">A new version is available. Refresh to update.</p>
+      <button id="sw-refresh" class="bg-white text-blue-600 px-3 py-1 rounded text-sm">
+        Refresh
+      </button>
+    </div>
+  `;
+  
+  document.body.appendChild(notification);
+  
+  // Add refresh button handler
+  document.getElementById('sw-refresh')?.addEventListener('click', () => {
+    window.location.reload();
+  });
+  
+  // Auto-remove after 1 minute if not clicked
+  setTimeout(() => {
+    if (document.body.contains(notification)) {
+      document.body.removeChild(notification);
+    }
+  }, 60000);
+}
+
+/**
+ * Save data for offline sync when back online
+ */
+export function saveForOfflineSync(endpoint: string, data: any) {
+  if (!isServiceWorkerSupported || !navigator.serviceWorker.controller) return;
+  
+  // Create a unique ID for this request
+  const uniqueId = `${endpoint}-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+  
+  // Store in IndexedDB or localStorage for the service worker to access
+  try {
+    localStorage.setItem(`offline-${uniqueId}`, JSON.stringify({
+      endpoint,
+      data,
+      timestamp: Date.now()
+    }));
+    
+    // Trigger sync if available
+    navigator.serviceWorker.ready.then(registration => {
+      if ('sync' in registration) {
+        registration.sync.register('order-sync').catch(err => {
+          console.error('Background sync registration failed:', err);
+        });
+      }
+    });
+    
+    return true;
+  } catch (e) {
+    console.error('Error saving data for offline sync:', e);
+    return false;
+  }
+}
+
+// Export default for easy importing
+export default registerServiceWorker;

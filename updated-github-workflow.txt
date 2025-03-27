@@ -1,0 +1,85 @@
+name: Deploy to Ubuntu Server
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Set up SSH
+        uses: webfactory/ssh-agent@v0.7.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+      
+      - name: Add SSH known hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H ${{ secrets.SERVER_HOST }} >> ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: Deploy to server
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+        run: |
+          ssh $SERVER_USER@$SERVER_HOST << 'EOF'
+            # Update PATH for the current session
+            export PATH=$PATH:/home/damned/.nvm/versions/node/v20.17.0/bin
+
+            # Navigate to project directory and deploy
+            cd htdocs/www.damneddesigns.com/Damned || { echo "Directory not found"; exit 1; }
+
+            # Backup current state
+            TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+            mkdir -p ~/backups
+            git bundle create ~/backups/damned_$TIMESTAMP.bundle HEAD master
+
+            # Deploy changes
+            git reset --hard
+            git clean -fd  
+            git pull origin master || { echo "Git pull failed"; exit 1; }
+            
+            # Verify env file exists
+            if [ ! -f env.prod ]; then
+              echo "env.prod file not found!"
+              exit 1
+            fi
+            
+            # Copy environment file
+            cp env.prod .env
+
+            # Install dependencies (uncomment if needed)
+            # npm install
+
+            # Build application
+            npm run build || { echo "Build failed"; exit 1; }
+            
+            # Restart application
+            pm2 kill
+            pm2 start "npm run start" --name "damned-designs"
+            pm2 save
+            
+            # Report deployment status
+            echo "Deployment completed successfully at $(date)"
+          EOF
+
+      - name: Send deployment notification
+        if: always()
+        run: |
+          if [ "${{ job.status }}" == "success" ]; then
+            echo "Deployment succeeded"
+            # Add notification logic (email, Slack, etc.)
+          else
+            echo "Deployment failed"
+            # Add notification logic (email, Slack, etc.)
+          fi

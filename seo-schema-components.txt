@@ -1,0 +1,114 @@
+// components/seo/ProductSchema.tsx
+import React from 'react';
+import { validateSchema, createProductSchema } from '@/lib/seo/validate-schema';
+
+interface ProductSchemaProps {
+  product: {
+    name: string;
+    description?: string;
+    image?: string;
+    price: string | number;
+    currency?: string;
+    sku?: string;
+    slug?: string;
+    availability?: 'InStock' | 'OutOfStock' | 'PreOrder';
+    brand?: string;
+    rating?: {
+      value: number;
+      count: number;
+    };
+  };
+  baseUrl?: string;
+}
+
+export const ProductSchema: React.FC<ProductSchemaProps> = ({ 
+  product,
+  baseUrl = 'https://damneddesigns.com'
+}) => {
+  // Create the schema object
+  const schemaData = {
+    ...createProductSchema(product),
+    url: `${baseUrl}/product/${product.slug || ''}`,
+  };
+  
+  // Validate in development
+  if (process.env.NODE_ENV === 'development') {
+    const validationResult = validateSchema(schemaData, 'Product');
+    if (!validationResult.valid) {
+      console.warn('Invalid Product schema:', validationResult.errors);
+    }
+  }
+
+  return (
+    <script
+      type="application/ld+json"
+      dangerouslySetInnerHTML={{ __html: JSON.stringify(schemaData) }}
+    />
+  );
+};
+
+// components/seo/BreadcrumbSchema.tsx
+import React from 'react';
+import { validateSchema, createBreadcrumbSchema } from '@/lib/seo/validate-schema';
+
+interface BreadcrumbSchemaProps {
+  items: Array<{
+    name: string;
+    href: string;
+  }>;
+  baseUrl?: string;
+}
+
+export const BreadcrumbSchema: React.FC<BreadcrumbSchemaProps> = ({ 
+  items,
+  baseUrl = 'https://damneddesigns.com'
+}) => {
+  // Format items for schema
+  const schemaItems = items.map(item => ({
+    name: item.name,
+    url: item.href.startsWith('http') ? item.href : `${baseUrl}${item.href}`,
+  }));
+  
+  // Create the schema object
+  const schemaData = createBreadcrumbSchema(schemaItems);
+  
+  // Validate in development
+  if (process.env.NODE_ENV === 'development') {
+    const validationResult = validateSchema(schemaData, 'BreadcrumbList');
+    if (!validationResult.valid) {
+      console.warn('Invalid BreadcrumbList schema:', validationResult.errors);
+    }
+  }
+
+  return (
+    <script
+      type="application/ld+json"
+      dangerouslySetInnerHTML={{ __html: JSON.stringify(schemaData) }}
+    />
+  );
+};
+
+// components/seo/OrganizationSchema.tsx
+import React from 'react';
+import { validateSchema, createOrganizationSchema } from '@/lib/seo/validate-schema';
+
+interface OrganizationSchemaProps {
+  organization?: {
+    name?: string;
+    url?: string;
+    logo?: string;
+    description?: string;
+    sameAs?: string[];
+    contactPoint?: {
+      telephone: string;
+      contactType: string;
+      email?: string;
+      availableLanguage?: string;
+    };
+  };
+}
+
+export const OrganizationSchema: React.FC<OrganizationSchemaProps> = ({ 
+  organization
+}) => {
+  // Use default or provided organization
